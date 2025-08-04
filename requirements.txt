@@ -1,7 +1,6 @@
 streamlit
-sounddevice
 scipy
 SpeechRecognition
 numpy
 pyttsx3
-pyaudio ; platform_system == "Windows"
+pyaudio
