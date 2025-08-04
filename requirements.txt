@@ -1,5 +1,5 @@
 streamlit
 streamlit-webrtc>=0.44.0
-SpeechRecognition
+speechrecognition
 gTTS
 numpy
