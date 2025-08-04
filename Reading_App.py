@@ -4,9 +4,7 @@ import random
 import base64
 import numpy as np
 from gtts import gTTS
-from streamlit_webrtc import webrtc_streamer, AudioProcessorBase
-import av
-import queue
+from streamlit_audiorecorder import audiorecorder
 import speech_recognition as sr
 import tempfile
 
@@ -89,18 +87,6 @@ def compare_text(expected, spoken):
     return " ".join(result)
 
 # --------------------------------------
-# Audio Processor
-# --------------------------------------
-class AudioProcessor(AudioProcessorBase):
-    def __init__(self):
-        self.audio_q = queue.Queue()
-
-    def recv(self, frame: av.AudioFrame) -> av.AudioFrame:
-        pcm = frame.to_ndarray().flatten().astype(np.int16).tobytes()
-        self.audio_q.put(pcm)
-        return frame
-
-# --------------------------------------
 # Streamlit App
 # --------------------------------------
 st.set_page_config(page_title="🗣️ AI Reading App", layout="centered")
@@ -122,47 +108,32 @@ st.markdown(f"""
 if st.button("🔊 Listen to correct pronunciation"):
     speak_text(generated_text)
 
-# Microphone input
+# --------------------------------------
+# Audio Recording
+# --------------------------------------
 st.subheader("🎤 Record your reading:")
-ctx = webrtc_streamer(
-    key="speech-demo",
-    audio_processor_factory=AudioProcessor,
-    media_stream_constraints={"video": False, "audio": True}
-)
+audio = audiorecorder("Click to record", "Recording... Click again to stop")
 
-if ctx.audio_receiver:
-    if st.button("🧪 Analyze Speech"):
-        audio_bytes = b""
-        audio_processor = ctx.audio_processor
+if audio:
+    with tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as f:
+        f.write(audio)
+        audio_path = f.name
 
-        if not audio_processor:
-            st.error("Audio processor not initialized.")
-        else:
-            with st.spinner("⏳ Processing your speech..."):
-                for _ in range(50):  # ~5 seconds of audio
-                    try:
-                        audio_bytes += audio_processor.audio_q.get(timeout=0.2)
-                    except queue.Empty:
-                        break
+    st.audio(audio, format="audio/wav")
+    recognizer = sr.Recognizer()
+    try:
+        with sr.AudioFile(audio_path) as source:
+            audio_data = recognizer.record(source)
+            spoken_text = recognizer.recognize_google(audio_data)
+            st.success("✅ Speech recognized successfully!")
 
-                with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as f:
-                    with open(f.name, "wb") as wf:
-                        wf.write(audio_bytes)
+            st.subheader("🧾 Word-by-Word Comparison:")
+            st.markdown(f"<div style='font-size:18px;line-height:1.8'>{compare_text(generated_text, spoken_text)}</div>", unsafe_allow_html=True)
 
-                    recognizer = sr.Recognizer()
-                    try:
-                        with sr.AudioFile(f.name) as source:
-                            audio_data = recognizer.record(source)
-                            spoken_text = recognizer.recognize_google(audio_data)
-                            st.success("✅ Speech recognized successfully!")
-
-                            st.subheader("🧾 Word-by-Word Comparison:")
-                            st.markdown(f"<div style='font-size:18px;line-height:1.8'>{compare_text(generated_text, spoken_text)}</div>", unsafe_allow_html=True)
-
-                    except sr.UnknownValueError:
-                        st.error("❌ Could not understand the audio.")
-                    except sr.RequestError:
-                        st.error("❌ Speech recognition API error.")
+    except sr.UnknownValueError:
+        st.error("❌ Could not understand the audio.")
+    except sr.RequestError:
+        st.error("❌ Speech recognition API error.")
 
 st.markdown("---")
-st.caption("Developed by Dr. Raju Murugan 💡 | Streamlit + gTTS + SpeechRecognition + WebRTC")
+st.caption("Developed by Dr. Raju Murugan 💡 | Streamlit + gTTS + streamlit-audiorecorder + SpeechRecognition")
