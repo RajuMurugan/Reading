@@ -3,4 +3,4 @@ scipy
 SpeechRecognition
 numpy
 pyttsx3
-pyaudio
+streamlit-webrtc
