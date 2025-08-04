@@ -3,4 +3,4 @@ SpeechRecognition
 numpy
 scipy
 gTTS
-streamlit-webrtc>=0.45.0
+streamlit-audiorecorder
