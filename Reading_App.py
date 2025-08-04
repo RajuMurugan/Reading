@@ -2,152 +2,122 @@ import streamlit as st
 import random
 import base64
 import tempfile
-from gtts import gTTS
 import time
+from gtts import gTTS
+from streamlit_webrtc import webrtc_streamer, AudioProcessorBase
+import av
+import queue
+import speech_recognition as sr
+import numpy as np
 
-# ------------------- Sample Text -------------------
+# Sample Text Database
 sample_sentences = {
     "PRE-KG": ["A B C D.", "Red, blue, green.", "One, two, three, four."],
     "UKG": ["Elephant has a trunk.", "Fish swims in water.", "Goat eats grass.", "House is big."],
     "PhD": ["Computational fluid dynamics governs complex flow behavior in turbulent regimes."]
 }
 
-# ------------------- Generate Text -------------------
 def generate_text(level, minutes):
-    total_words = minutes * 20
+    target = minutes * 20
     sentences = sample_sentences.get(level, [])
-    paragraph = ""
-    last_sentence = ""
-    while len(paragraph.split()) < total_words:
+    paragraph, last = "", ""
+    while len(paragraph.split()) < target:
         choice = random.choice(sentences)
-        if choice != last_sentence:
-            paragraph += " " + choice
-            last_sentence = choice
+        if choice != last:
+            paragraph += (" " + choice)
+            last = choice
     return paragraph.strip()
 
-# ------------------- Text-to-Speech -------------------
 def speak_text(text):
     tts = gTTS(text)
     with tempfile.NamedTemporaryFile(delete=False, suffix=".mp3") as f:
         tts.save(f.name)
-        audio_path = f.name
-    with open(audio_path, "rb") as audio_file:
-        b64 = base64.b64encode(audio_file.read()).decode()
-        audio_html = f"""
-        <audio autoplay controls style="width: 100%;">
-            <source src="data:audio/mp3;base64,{b64}" type="audio/mp3">
-        </audio>
-        """
-        st.markdown(audio_html, unsafe_allow_html=True)
+        path = f.name
+    with open(path, "rb") as af:
+        b64 = base64.b64encode(af.read()).decode()
+        st.markdown(f"""
+            <audio autoplay controls style="width:100%;">
+              <source src="data:audio/mp3;base64,{b64}" type="audio/mp3">
+            </audio>
+        """, unsafe_allow_html=True)
 
-# ------------------- Compare -------------------
 def compare_text(expected, spoken):
-    expected_words = expected.strip().lower().split()
-    spoken_words = spoken.strip().lower().split()
-    result = []
-    correct = 0
-    for i, word in enumerate(expected_words):
-        if i < len(spoken_words) and word == spoken_words[i]:
-            result.append(f"<span style='color:green'>{spoken_words[i]}</span>")
+    exp = expected.strip().lower().split()
+    sp = spoken.strip().lower().split()
+    result, correct = [], 0
+    for i, w in enumerate(exp):
+        if i < len(sp) and sp[i] == w:
+            result.append(f"<span style='color:green'>{sp[i]}</span>")
             correct += 1
-        elif i < len(spoken_words):
-            result.append(f"<span style='color:red'>{spoken_words[i]}</span>")
+        elif i < len(sp):
+            result.append(f"<span style='color:red'>{sp[i]}</span>")
         else:
-            result.append(f"<span style='color:gray'>{word}</span>")
-    return " ".join(result), correct, len(spoken_words)
+            result.append(f"<span style='color:gray'>{w}</span>")
+    return " ".join(result), correct, len(sp)
 
-# ------------------- Streamlit UI -------------------
-st.set_page_config(page_title="🗣️ AI Reading App", layout="centered")
-st.title("🧠 AI Reading App: PRE-KG to PhD")
+class AudioProcessor(AudioProcessorBase):
+    def __init__(self):
+        self.buffer = queue.Queue()
 
-level = st.selectbox("📘 Choose class level:", list(sample_sentences.keys()))
-minutes = st.slider("⏱️ Select reading duration (min):", 1, 5, 1)
+    def recv(self, frame: av.AudioFrame) -> av.AudioFrame:
+        pcm = frame.to_ndarray().flatten().astype(np.int16).tobytes()
+        self.buffer.put(pcm)
+        return frame
 
-generated_text = generate_text(level, minutes)
+st.set_page_config("AI Reading App", layout="centered")
+st.title("🧠 AI Reading App: Pronunciation + WPM")
 
-st.subheader("📝 Please read the following:")
-st.markdown(f"""
-<div style='background-color:#f0f8ff; padding:15px; border-radius:10px; font-size:18px; line-height:1.7; max-height:300px; overflow:auto;'>
-{generated_text}
-</div>
-""", unsafe_allow_html=True)
+level = st.selectbox("Choose level:", list(sample_sentences.keys()))
+minutes = st.slider("Reading duration (minutes):", 1, 5, 1)
+generated = generate_text(level, minutes)
+st.subheader("Please read the following:")
+st.markdown(f"<div style='background:#f0f8ff;padding:15px; border-radius:10px;'>{generated}</div>", unsafe_allow_html=True)
 
-if st.button("🔊 Listen to pronunciation"):
-    speak_text(generated_text)
+if st.button("🔊 Listen"):
+    speak_text(generated)
 
-# ------------------- JavaScript Live Speech -------------------
-st.subheader("🎤 Start Speaking (Live - Chrome only)")
+st.subheader("🎤 Speak Now (Live mic):")
+ctx = webrtc_streamer(
+    key="mic",
+    audio_processor_factory=AudioProcessor,
+    media_stream_constraints={"video": False, "audio": True},
+    rtc_configuration={"iceServers": [{"urls": ["stun:stun.l.google.com:19302"]}]},
+    async_processing=True,
+)
 
-spoken_text = st.text_input("🗣️ Transcript appears here:", key="spoken")
+if ctx.audio_receiver:
+    if st.button("🧪 Process Speech"):
+        audio_bytes = b""
+        proc = ctx.audio_processor
+        with st.spinner("Processing speech..."):
+            for _ in range(50):
+                try:
+                    audio_bytes += proc.buffer.get(timeout=0.2)
+                except queue.Empty:
+                    break
 
-st.markdown("""
-<button onclick="startRecognition()" style="font-size:18px; padding:10px 20px; background-color:#4CAF50; color:white; border:none; border-radius:8px;">
-🎙️ Start Speaking
-</button>
-<p id="transcript" style="font-size:18px; color:blue; margin-top:15px;"></p>
+        if audio_bytes:
+            with tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as f:
+                f.write(audio_bytes)
+                recognizer = sr.Recognizer()
+                with sr.AudioFile(f.name) as src:
+                    data = recognizer.record(src)
+                try:
+                    spoken = recognizer.recognize_google(data)
+                    st.success("✅ Recognized: " + spoken)
+                    comp_html, corr, total = compare_text(generated, spoken)
+                    st.subheader("Word-by-Word Comparison:")
+                    st.markdown(comp_html, unsafe_allow_html=True)
 
-<script>
-function startRecognition() {
-    const transcriptEl = document.getElementById("transcript");
-    window.SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-    if (!window.SpeechRecognition) {
-        transcriptEl.innerHTML = "<span style='color:red'>❌ Speech Recognition not supported in this browser.</span>";
-        return;
-    }
-
-    const recognition = new SpeechRecognition();
-    recognition.lang = 'en-US';
-    recognition.interimResults = false;
-    recognition.maxAlternatives = 1;
-
-    transcriptEl.innerHTML = "🎧 Listening... Please speak";
-
-    recognition.start();
-    let startTime = performance.now();
-
-    recognition.onresult = function(event) {
-        let endTime = performance.now();
-        let seconds = ((endTime - startTime) / 1000).toFixed(2);
-
-        const spoken = event.results[0][0].transcript;
-        transcriptEl.innerHTML = "✅ You said: <b>" + spoken + "</b><br><i>Duration: " + seconds + "s</i>";
-
-        const py_input = document.querySelector("input[data-baseweb='input']");
-        if(py_input) {
-            py_input.value = spoken;
-            py_input.dispatchEvent(new Event("input", { bubbles: true }));
-        }
-
-        const dur = document.getElementById("duration");
-        if (dur) dur.value = seconds;
-    };
-
-    recognition.onerror = function(event) {
-        transcriptEl.innerHTML = "<span style='color:red'>❌ Error: " + event.error + "</span>";
-    };
-}
-</script>
-""", unsafe_allow_html=True)
-
-# Hidden duration input from JS
-duration = st.text_input("📏 Hidden duration", value="0", key="duration", label_visibility="collapsed")
-
-# ------------------- Comparison -------------------
-if spoken_text:
-    st.subheader("🧾 Word-by-Word Comparison:")
-    comparison_html, correct, total = compare_text(generated_text, spoken_text)
-    st.markdown(f"<div style='font-size:18px;line-height:1.8'>{comparison_html}</div>", unsafe_allow_html=True)
-
-    # WPM calculation
-    try:
-        duration_sec = float(duration) if duration else 60
-        wpm = round((total / duration_sec) * 60, 2)
-        accuracy = round((correct / len(generated_text.strip().split())) * 100, 2)
-
-        st.success(f"✅ Words per Minute (WPM): **{wpm}**")
-        st.info(f"🧠 Pronunciation Accuracy: **{accuracy}%**")
-    except:
-        st.warning("⚠️ Could not calculate WPM or accuracy. Try again.")
-
+                    wpm = round((total / (minutes * 60)) * 60, 2)  # since audio length ~ minutes
+                    accuracy = round((corr / len(generated.split())) * 100, 2)
+                    st.info(f"WPM: **{wpm}**, Accuracy: **{accuracy}%**")
+                except sr.RequestError:
+                    st.error("Speech recognition failed.")
+                except sr.UnknownValueError:
+                    st.error("Couldn't understand audio.")
+        else:
+            st.error("No audio captured.")
+                    
 st.markdown("---")
-st.caption("Developed by Dr. Raju Murugan 💡 | Streamlit + gTTS + JS SpeechRecognition")
+st.caption("Built by Dr. Raju Murugan | Uses Streamlit‑WebRTC + Google SpeechRecognition")
