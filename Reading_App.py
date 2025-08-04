@@ -4,10 +4,9 @@ import random
 import base64
 import numpy as np
 from gtts import gTTS
-from streamlit_webrtc import webrtc_streamer, AudioProcessorBase, ClientSettings
+from streamlit_webrtc import webrtc_streamer, AudioProcessorBase
 import av
 import queue
-import threading
 import speech_recognition as sr
 import tempfile
 
@@ -63,7 +62,6 @@ def speak_text(text):
         tts.save(f.name)
         audio_path = f.name
 
-    # Load and return audio HTML
     with open(audio_path, "rb") as audio_file:
         b64 = base64.b64encode(audio_file.read()).decode()
         audio_html = f"""
@@ -75,7 +73,7 @@ def speak_text(text):
         st.markdown(audio_html, unsafe_allow_html=True)
 
 # --------------------------------------
-# Compare texts
+# Compare expected vs spoken text
 # --------------------------------------
 def compare_text(expected, spoken):
     expected_words = expected.strip().lower().split()
@@ -126,16 +124,10 @@ if st.button("🔊 Listen to correct pronunciation"):
 
 # Microphone input
 st.subheader("🎤 Record your reading:")
-
 ctx = webrtc_streamer(
-    key="speech",
-    mode="SENDRECV",
-    audio_receiver_size=1024,
-    client_settings=ClientSettings(
-        media_stream_constraints={"video": False, "audio": True},
-        rtc_configuration={"iceServers": [{"urls": ["stun:stun.l.google.com:19302"]}]},
-    ),
+    key="speech-demo",
     audio_processor_factory=AudioProcessor,
+    media_stream_constraints={"video": False, "audio": True}
 )
 
 if ctx.audio_receiver:
@@ -156,6 +148,7 @@ if ctx.audio_receiver:
                 with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as f:
                     with open(f.name, "wb") as wf:
                         wf.write(audio_bytes)
+
                     recognizer = sr.Recognizer()
                     try:
                         with sr.AudioFile(f.name) as source:
@@ -172,4 +165,4 @@ if ctx.audio_receiver:
                         st.error("❌ Speech recognition API error.")
 
 st.markdown("---")
-st.caption("Developed by Dr. Raju Murugan 💡 | Powered by Streamlit, gTTS, and streamlit-webrtc")
+st.caption("Developed by Dr. Raju Murugan 💡 | Streamlit + gTTS + SpeechRecognition + WebRTC")
