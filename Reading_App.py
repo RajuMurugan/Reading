@@ -3,15 +3,16 @@ import random
 import base64
 import tempfile
 from gtts import gTTS
+from urllib.parse import quote, unquote
 
-# Sample database
+# ------------------- Sample Text -------------------
 sample_sentences = {
     "PRE-KG": ["A B C D.", "Red, blue, green.", "One, two, three, four."],
     "UKG": ["Elephant has a trunk.", "Fish swims in water.", "Goat eats grass.", "House is big."],
-    "Class 1": ["I am playing outside.", "She is reading a book.", "He is running fast.", "The sun is bright."],
     "PhD": ["Computational fluid dynamics governs complex flow behavior in turbulent regimes."]
 }
 
+# ------------------- Generate Text -------------------
 def generate_text(level, minutes):
     total_words = minutes * 20
     sentences = sample_sentences.get(level, [])
@@ -24,6 +25,7 @@ def generate_text(level, minutes):
             last_sentence = choice
     return paragraph.strip()
 
+# ------------------- Text-to-Speech -------------------
 def speak_text(text):
     tts = gTTS(text)
     with tempfile.NamedTemporaryFile(delete=False, suffix=".mp3") as f:
@@ -38,6 +40,7 @@ def speak_text(text):
         """
         st.markdown(audio_html, unsafe_allow_html=True)
 
+# ------------------- Compare -------------------
 def compare_text(expected, spoken):
     expected_words = expected.strip().lower().split()
     spoken_words = spoken.strip().lower().split()
@@ -51,7 +54,7 @@ def compare_text(expected, spoken):
             result.append(f"<span style='color:gray'>{word}</span>")
     return " ".join(result)
 
-# Streamlit UI
+# ------------------- Streamlit UI -------------------
 st.set_page_config(page_title="🗣️ AI Reading App", layout="centered")
 st.title("🧠 AI Reading App: PRE-KG to PhD")
 
@@ -70,44 +73,51 @@ st.markdown(f"""
 if st.button("🔊 Listen to pronunciation"):
     speak_text(generated_text)
 
-st.subheader("🎤 Speak into mic and get live transcription")
+# ------------------- JavaScript Speech Recognition -------------------
+st.subheader("🎤 Speak now (No upload needed)")
+placeholder = st.empty()
+spoken_text = st.text_input("🗣️ Transcript will appear here", key="spoken")
+
 st.markdown("""
-<button onclick="startRecognition()">🎙️ Start Speaking</button>
-<p id="output" style="font-size:18px; padding-top:10px;"></p>
+<button onclick="startRecognition()" style="font-size:18px; padding:10px 20px; background-color:#4CAF50; color:white; border:none; border-radius:8px;">
+🎙️ Start Speaking
+</button>
+<p id="transcript" style="font-size:18px; color:blue; margin-top:15px;"></p>
 
 <script>
-function startRecognition() {
-    const output = document.getElementById("output");
-    window.SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-    const recognition = new SpeechRecognition();
-    recognition.lang = 'en-US';
-    recognition.interimResults = false;
-    recognition.maxAlternatives = 1;
+    function startRecognition() {
+        const transcriptEl = document.getElementById("transcript");
+        window.SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+        const recognition = new SpeechRecognition();
+        recognition.lang = 'en-US';
+        recognition.interimResults = false;
+        recognition.maxAlternatives = 1;
 
-    output.innerHTML = "🎤 Listening...";
+        transcriptEl.innerHTML = "Listening... Please speak";
 
-    recognition.onresult = function(event) {
-        const transcript = event.results[0][0].transcript;
-        output.innerHTML = "🗣️ You said: <b>" + transcript + "</b>";
-        const url = new URL(window.location);
-        url.searchParams.set("spoken", transcript);
-        window.location.href = url.toString();
-    };
+        recognition.start();
 
-    recognition.onerror = function(event) {
-        output.innerHTML = "❌ Error: " + event.error;
-    };
+        recognition.onresult = function(event) {
+            const spoken = event.results[0][0].transcript;
+            transcriptEl.innerHTML = "You said: <b>" + spoken + "</b>";
+            const py_input = document.querySelector("input[data-baseweb='input']");
+            if(py_input) {
+                py_input.value = spoken;
+                py_input.dispatchEvent(new Event("input", { bubbles: true }));
+            }
+        };
 
-    recognition.start();
-}
+        recognition.onerror = function(event) {
+            transcriptEl.innerHTML = "<span style='color:red'>❌ Error: " + event.error + "</span>";
+        };
+    }
 </script>
 """, unsafe_allow_html=True)
 
-# ✅ New API to get spoken words from URL
-spoken = st.query_params.get("spoken", None)
-if spoken:
+# ------------------- Comparison -------------------
+if spoken_text:
     st.subheader("🧾 Word-by-Word Comparison:")
-    st.markdown(f"<div style='font-size:18px;line-height:1.8'>{compare_text(generated_text, spoken)}</div>", unsafe_allow_html=True)
+    st.markdown(f"<div style='font-size:18px;line-height:1.8'>{compare_text(generated_text, spoken_text)}</div>", unsafe_allow_html=True)
 
 st.markdown("---")
-st.caption("Made by Dr. Raju Murugan 💡 | Powered by Streamlit + JavaScript Web Speech API")
+st.caption("Developed by Dr. Raju Murugan 💡 | Streamlit + JavaScript Speech Recognition")
