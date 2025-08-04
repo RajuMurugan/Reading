@@ -1,6 +1,6 @@
 streamlit
-scipy
 SpeechRecognition
 numpy
-pyttsx3
+scipy
+gTTS
 streamlit-webrtc
