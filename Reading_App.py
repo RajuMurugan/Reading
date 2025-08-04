@@ -3,6 +3,7 @@ import random
 import base64
 import tempfile
 from gtts import gTTS
+import time
 
 # ------------------- Sample Text -------------------
 sample_sentences = {
@@ -44,14 +45,16 @@ def compare_text(expected, spoken):
     expected_words = expected.strip().lower().split()
     spoken_words = spoken.strip().lower().split()
     result = []
+    correct = 0
     for i, word in enumerate(expected_words):
         if i < len(spoken_words) and word == spoken_words[i]:
             result.append(f"<span style='color:green'>{spoken_words[i]}</span>")
+            correct += 1
         elif i < len(spoken_words):
             result.append(f"<span style='color:red'>{spoken_words[i]}</span>")
         else:
             result.append(f"<span style='color:gray'>{word}</span>")
-    return " ".join(result)
+    return " ".join(result), correct, len(spoken_words)
 
 # ------------------- Streamlit UI -------------------
 st.set_page_config(page_title="🗣️ AI Reading App", layout="centered")
@@ -72,10 +75,10 @@ st.markdown(f"""
 if st.button("🔊 Listen to pronunciation"):
     speak_text(generated_text)
 
-# ------------------- Live Speaking (JavaScript only) -------------------
-st.subheader("🎤 Speak now (no upload needed)")
+# ------------------- JavaScript Live Speech -------------------
+st.subheader("🎤 Start Speaking (Live - Chrome only)")
 
-spoken_text = st.text_input("🗣️ Transcript will appear here:", key="spoken")
+spoken_text = st.text_input("🗣️ Transcript appears here:", key="spoken")
 
 st.markdown("""
 <button onclick="startRecognition()" style="font-size:18px; padding:10px 20px; background-color:#4CAF50; color:white; border:none; border-radius:8px;">
@@ -84,44 +87,67 @@ st.markdown("""
 <p id="transcript" style="font-size:18px; color:blue; margin-top:15px;"></p>
 
 <script>
-    function startRecognition() {
-        const transcriptEl = document.getElementById("transcript");
-        window.SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-        if (!window.SpeechRecognition) {
-            transcriptEl.innerHTML = "<span style='color:red'>❌ Speech Recognition not supported in this browser.</span>";
-            return;
+function startRecognition() {
+    const transcriptEl = document.getElementById("transcript");
+    window.SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (!window.SpeechRecognition) {
+        transcriptEl.innerHTML = "<span style='color:red'>❌ Speech Recognition not supported in this browser.</span>";
+        return;
+    }
+
+    const recognition = new SpeechRecognition();
+    recognition.lang = 'en-US';
+    recognition.interimResults = false;
+    recognition.maxAlternatives = 1;
+
+    transcriptEl.innerHTML = "🎧 Listening... Please speak";
+
+    recognition.start();
+    let startTime = performance.now();
+
+    recognition.onresult = function(event) {
+        let endTime = performance.now();
+        let seconds = ((endTime - startTime) / 1000).toFixed(2);
+
+        const spoken = event.results[0][0].transcript;
+        transcriptEl.innerHTML = "✅ You said: <b>" + spoken + "</b><br><i>Duration: " + seconds + "s</i>";
+
+        const py_input = document.querySelector("input[data-baseweb='input']");
+        if(py_input) {
+            py_input.value = spoken;
+            py_input.dispatchEvent(new Event("input", { bubbles: true }));
         }
 
-        const recognition = new SpeechRecognition();
-        recognition.lang = 'en-US';
-        recognition.interimResults = false;
-        recognition.maxAlternatives = 1;
+        const dur = document.getElementById("duration");
+        if (dur) dur.value = seconds;
+    };
 
-        transcriptEl.innerHTML = "🎧 Listening... Please speak";
-
-        recognition.start();
-
-        recognition.onresult = function(event) {
-            const spoken = event.results[0][0].transcript;
-            transcriptEl.innerHTML = "✅ You said: <b>" + spoken + "</b>";
-            const py_input = document.querySelector("input[data-baseweb='input']");
-            if(py_input) {
-                py_input.value = spoken;
-                py_input.dispatchEvent(new Event("input", { bubbles: true }));
-            }
-        };
-
-        recognition.onerror = function(event) {
-            transcriptEl.innerHTML = "<span style='color:red'>❌ Error: " + event.error + "</span>";
-        };
-    }
+    recognition.onerror = function(event) {
+        transcriptEl.innerHTML = "<span style='color:red'>❌ Error: " + event.error + "</span>";
+    };
+}
 </script>
 """, unsafe_allow_html=True)
+
+# Hidden duration input from JS
+duration = st.text_input("📏 Hidden duration", value="0", key="duration", label_visibility="collapsed")
 
 # ------------------- Comparison -------------------
 if spoken_text:
     st.subheader("🧾 Word-by-Word Comparison:")
-    st.markdown(f"<div style='font-size:18px;line-height:1.8'>{compare_text(generated_text, spoken_text)}</div>", unsafe_allow_html=True)
+    comparison_html, correct, total = compare_text(generated_text, spoken_text)
+    st.markdown(f"<div style='font-size:18px;line-height:1.8'>{comparison_html}</div>", unsafe_allow_html=True)
+
+    # WPM calculation
+    try:
+        duration_sec = float(duration) if duration else 60
+        wpm = round((total / duration_sec) * 60, 2)
+        accuracy = round((correct / len(generated_text.strip().split())) * 100, 2)
+
+        st.success(f"✅ Words per Minute (WPM): **{wpm}**")
+        st.info(f"🧠 Pronunciation Accuracy: **{accuracy}%**")
+    except:
+        st.warning("⚠️ Could not calculate WPM or accuracy. Try again.")
 
 st.markdown("---")
-st.caption("Developed by Dr. Raju Murugan 💡 | Streamlit + gTTS + JavaScript Speech Recognition")
+st.caption("Developed by Dr. Raju Murugan 💡 | Streamlit + gTTS + JS SpeechRecognition")
