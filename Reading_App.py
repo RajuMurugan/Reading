@@ -1,9 +1,6 @@
 import streamlit as st
 import time
-import sounddevice as sd
-from scipy.io.wavfile import write
 import speech_recognition as sr
-import tempfile
 import numpy as np
 import random
 import base64
@@ -55,21 +52,14 @@ def generate_text(level, minutes):
     return paragraph.strip()
 
 # -----------------------------
-# Record user's speech
+# Record user's speech (microphone only)
 # -----------------------------
-def recognize_speech(duration):
-    fs = 44100
-    st.info(f"🎙️ Recording for {duration} seconds. Please start speaking.")
-    recording = sd.rec(int(duration * fs), samplerate=fs, channels=1, dtype='int16')
-    sd.wait()
-
-    with tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as f:
-        write(f.name, fs, recording)
-        wav_path = f.name
-
+def recognize_speech(duration=10):
     recognizer = sr.Recognizer()
-    with sr.AudioFile(wav_path) as source:
-        audio = recognizer.record(source)
+    with sr.Microphone() as source:
+        st.info(f"🎙️ Recording for {duration} seconds. Please start speaking...")
+        recognizer.adjust_for_ambient_noise(source)
+        audio = recognizer.listen(source, timeout=duration)
 
     try:
         spoken_text = recognizer.recognize_google(audio)
@@ -78,7 +68,7 @@ def recognize_speech(duration):
     except sr.RequestError:
         spoken_text = "API unavailable"
 
-    return spoken_text, wav_path
+    return spoken_text, None
 
 # -----------------------------
 # Word-by-word comparison
@@ -103,20 +93,6 @@ def calculate_wpm(spoken_text, start, end):
     num_words = len(spoken_text.strip().split())
     time_taken = (end - start) / 60
     return round(num_words / time_taken, 2) if time_taken else 0
-
-# -----------------------------
-# Audio HTML for playback
-# -----------------------------
-def get_audio_html(wav_path):
-    with open(wav_path, "rb") as f:
-        audio_bytes = f.read()
-        b64 = base64.b64encode(audio_bytes).decode()
-        return f"""
-        <audio controls style="width:100%;">
-            <source src="data:audio/wav;base64,{b64}" type="audio/wav">
-            Your browser does not support audio playback.
-        </audio>
-        """
 
 # -----------------------------
 # Text-to-Speech Playback
@@ -157,7 +133,7 @@ if st.button("🔊 Listen to correct pronunciation"):
 if st.button("🎤 Start Reading"):
     duration_seconds = min(20 + minutes * 2, 120)
     start_time = time.time()
-    spoken_text, audio_path = recognize_speech(duration_seconds)
+    spoken_text, _ = recognize_speech(duration_seconds)
     end_time = time.time()
 
     if spoken_text.strip():
@@ -166,11 +142,8 @@ if st.button("🎤 Start Reading"):
 
         wpm = calculate_wpm(spoken_text, start_time, end_time)
         st.success(f"🕒 Reading Speed: **{wpm} WPM**")
-
-        st.subheader("🔁 Playback your recording:")
-        st.markdown(get_audio_html(audio_path), unsafe_allow_html=True)
     else:
         st.error("❌ Could not recognize your speech. Please try again.")
 
 st.markdown("---")
-st.caption("Developed by Dr. Raju Murugan 💡 | Streamlit + SoundDevice + Google SpeechRecognition + pyttsx3")
+st.caption("Developed by Dr. Raju Murugan 💡 | Streamlit + Google SpeechRecognition + pyttsx3")
