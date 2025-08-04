@@ -1,14 +1,19 @@
 import streamlit as st
 import time
-import speech_recognition as sr
-import numpy as np
 import random
 import base64
-import pyttsx3
+import numpy as np
+from gtts import gTTS
+from streamlit_webrtc import webrtc_streamer, AudioProcessorBase, ClientSettings
+import av
+import queue
+import threading
+import speech_recognition as sr
+import tempfile
 
-# -----------------------------
-# Extended sentence database
-# -----------------------------
+# --------------------------------------
+# Sample sentences database
+# --------------------------------------
 sample_sentences = {
     "PRE-KG": ["A B C D.", "Red, blue, green.", "One, two, three, four."],
     "LKG": ["Apple is red.", "Ball is round.", "Cat is cute.", "Dog barks loudly."],
@@ -34,13 +39,12 @@ sample_sentences = {
             "Multiphase reacting flows are often simulated using large eddy simulation models."]
 }
 
-# -----------------------------
-# Generate formatted paragraph
-# -----------------------------
+# --------------------------------------
+# Generate paragraph
+# --------------------------------------
 def generate_text(level, minutes):
     total_words = minutes * 20
     sentences = sample_sentences.get(level, [])
-    used = set()
     paragraph = ""
     last_sentence = ""
     while len(paragraph.split()) < total_words:
@@ -48,31 +52,31 @@ def generate_text(level, minutes):
         if choice != last_sentence:
             paragraph += " " + choice
             last_sentence = choice
-            used.add(choice)
     return paragraph.strip()
 
-# -----------------------------
-# Record user's speech (microphone only)
-# -----------------------------
-def recognize_speech(duration=10):
-    recognizer = sr.Recognizer()
-    with sr.Microphone() as source:
-        st.info(f"🎙️ Recording for {duration} seconds. Please start speaking...")
-        recognizer.adjust_for_ambient_noise(source)
-        audio = recognizer.listen(source, timeout=duration)
+# --------------------------------------
+# Text-to-Speech using gTTS
+# --------------------------------------
+def speak_text(text):
+    tts = gTTS(text)
+    with tempfile.NamedTemporaryFile(delete=False, suffix=".mp3") as f:
+        tts.save(f.name)
+        audio_path = f.name
 
-    try:
-        spoken_text = recognizer.recognize_google(audio)
-    except sr.UnknownValueError:
-        spoken_text = ""
-    except sr.RequestError:
-        spoken_text = "API unavailable"
+    # Load and return audio HTML
+    with open(audio_path, "rb") as audio_file:
+        b64 = base64.b64encode(audio_file.read()).decode()
+        audio_html = f"""
+        <audio autoplay controls style="width: 100%;">
+            <source src="data:audio/mp3;base64,{b64}" type="audio/mp3">
+            Your browser does not support the audio element.
+        </audio>
+        """
+        st.markdown(audio_html, unsafe_allow_html=True)
 
-    return spoken_text, None
-
-# -----------------------------
-# Word-by-word comparison
-# -----------------------------
+# --------------------------------------
+# Compare texts
+# --------------------------------------
 def compare_text(expected, spoken):
     expected_words = expected.strip().lower().split()
     spoken_words = spoken.strip().lower().split()
@@ -86,38 +90,30 @@ def compare_text(expected, spoken):
             result.append(f"<span style='color:gray'>{word}</span>")
     return " ".join(result)
 
-# -----------------------------
-# Calculate WPM
-# -----------------------------
-def calculate_wpm(spoken_text, start, end):
-    num_words = len(spoken_text.strip().split())
-    time_taken = (end - start) / 60
-    return round(num_words / time_taken, 2) if time_taken else 0
+# --------------------------------------
+# Audio Processor
+# --------------------------------------
+class AudioProcessor(AudioProcessorBase):
+    def __init__(self):
+        self.audio_q = queue.Queue()
 
-# -----------------------------
-# Text-to-Speech Playback
-# -----------------------------
-def speak_text(text):
-    engine = pyttsx3.init()
-    engine.setProperty('rate', 150)
-    engine.say(text)
-    engine.runAndWait()
+    def recv(self, frame: av.AudioFrame) -> av.AudioFrame:
+        pcm = frame.to_ndarray().flatten().astype(np.int16).tobytes()
+        self.audio_q.put(pcm)
+        return frame
 
-# -----------------------------
-# Streamlit UI
-# -----------------------------
+# --------------------------------------
+# Streamlit App
+# --------------------------------------
 st.set_page_config(page_title="🗣️ AI Reading App", layout="centered")
 st.title("🧠 AI Reading App: PRE-KG to PhD")
 st.markdown("📚 Select your class level and reading time. We'll generate text, let you hear it, and evaluate your pronunciation.")
 
-# Inputs
 level = st.selectbox("📘 Choose your class level:", list(sample_sentences.keys()))
 minutes = st.slider("⏱️ Select reading duration (in minutes):", 1, 30, 2)
 
-# Generate paragraph
 generated_text = generate_text(level, minutes)
 
-# Show paragraph
 st.subheader("📝 Please read the following:")
 st.markdown(f"""
 <div style='background-color:#f0f8ff; color:#000000; padding:15px; border-radius:10px; font-size:18px; line-height:1.7; overflow:auto; max-height:300px;'>
@@ -125,25 +121,55 @@ st.markdown(f"""
 </div>
 """, unsafe_allow_html=True)
 
-# TTS playback
 if st.button("🔊 Listen to correct pronunciation"):
     speak_text(generated_text)
 
-# Record & evaluate
-if st.button("🎤 Start Reading"):
-    duration_seconds = min(20 + minutes * 2, 120)
-    start_time = time.time()
-    spoken_text, _ = recognize_speech(duration_seconds)
-    end_time = time.time()
+# Microphone input
+st.subheader("🎤 Record your reading:")
 
-    if spoken_text.strip():
-        st.subheader("🧾 Word-by-Word Comparison:")
-        st.markdown(f"<div style='font-size:18px;line-height:1.8'>{compare_text(generated_text, spoken_text)}</div>", unsafe_allow_html=True)
+ctx = webrtc_streamer(
+    key="speech",
+    mode="SENDRECV",
+    audio_receiver_size=1024,
+    client_settings=ClientSettings(
+        media_stream_constraints={"video": False, "audio": True},
+        rtc_configuration={"iceServers": [{"urls": ["stun:stun.l.google.com:19302"]}]},
+    ),
+    audio_processor_factory=AudioProcessor,
+)
 
-        wpm = calculate_wpm(spoken_text, start_time, end_time)
-        st.success(f"🕒 Reading Speed: **{wpm} WPM**")
-    else:
-        st.error("❌ Could not recognize your speech. Please try again.")
+if ctx.audio_receiver:
+    if st.button("🧪 Analyze Speech"):
+        audio_bytes = b""
+        audio_processor = ctx.audio_processor
+
+        if not audio_processor:
+            st.error("Audio processor not initialized.")
+        else:
+            with st.spinner("⏳ Processing your speech..."):
+                for _ in range(50):  # ~5 seconds of audio
+                    try:
+                        audio_bytes += audio_processor.audio_q.get(timeout=0.2)
+                    except queue.Empty:
+                        break
+
+                with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as f:
+                    with open(f.name, "wb") as wf:
+                        wf.write(audio_bytes)
+                    recognizer = sr.Recognizer()
+                    try:
+                        with sr.AudioFile(f.name) as source:
+                            audio_data = recognizer.record(source)
+                            spoken_text = recognizer.recognize_google(audio_data)
+                            st.success("✅ Speech recognized successfully!")
+
+                            st.subheader("🧾 Word-by-Word Comparison:")
+                            st.markdown(f"<div style='font-size:18px;line-height:1.8'>{compare_text(generated_text, spoken_text)}</div>", unsafe_allow_html=True)
+
+                    except sr.UnknownValueError:
+                        st.error("❌ Could not understand the audio.")
+                    except sr.RequestError:
+                        st.error("❌ Speech recognition API error.")
 
 st.markdown("---")
-st.caption("Developed by Dr. Raju Murugan 💡 | Streamlit + Google SpeechRecognition + pyttsx3")
+st.caption("Developed by Dr. Raju Murugan 💡 | Powered by Streamlit, gTTS, and streamlit-webrtc")
