@@ -4,7 +4,6 @@ import random
 import base64
 import numpy as np
 from gtts import gTTS
-from streamlit_audiorecorder import audiorecorder
 import speech_recognition as sr
 import tempfile
 
@@ -109,17 +108,17 @@ if st.button("🔊 Listen to correct pronunciation"):
     speak_text(generated_text)
 
 # --------------------------------------
-# Audio Recording
+# File Upload (Recording)
 # --------------------------------------
-st.subheader("🎤 Record your reading:")
-audio = audiorecorder("Click to record", "Recording... Click again to stop")
+st.subheader("🎤 Upload your reading (WAV or MP3):")
+uploaded_audio = st.file_uploader("Upload your recording", type=["wav", "mp3"])
 
-if audio:
+if uploaded_audio is not None:
+    st.audio(uploaded_audio, format='audio/wav')
     with tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as f:
-        f.write(audio)
+        f.write(uploaded_audio.read())
         audio_path = f.name
 
-    st.audio(audio, format="audio/wav")
     recognizer = sr.Recognizer()
     try:
         with sr.AudioFile(audio_path) as source:
@@ -136,4 +135,4 @@ if audio:
         st.error("❌ Speech recognition API error.")
 
 st.markdown("---")
-st.caption("Developed by Dr. Raju Murugan 💡 | Streamlit + gTTS + streamlit-audiorecorder + SpeechRecognition")
+st.caption("Developed by Dr. Raju Murugan 💡 | Streamlit + gTTS + SpeechRecognition")
