@@ -89,7 +89,9 @@ function startRecognition() {
     recognition.onresult = function(event) {
         const transcript = event.results[0][0].transcript;
         output.innerHTML = "🗣️ You said: <b>" + transcript + "</b>";
-        window.parent.postMessage({type: 'spoken_text', text: transcript}, '*');
+        const url = new URL(window.location);
+        url.searchParams.set("spoken", transcript);
+        window.location.href = url.toString();
     };
 
     recognition.onerror = function(event) {
@@ -101,11 +103,11 @@ function startRecognition() {
 </script>
 """, unsafe_allow_html=True)
 
-# Handle incoming transcribed text
-spoken = st.experimental_get_query_params().get("spoken", [None])[0]
+# ✅ New API to get spoken words from URL
+spoken = st.query_params.get("spoken", None)
 if spoken:
     st.subheader("🧾 Word-by-Word Comparison:")
     st.markdown(f"<div style='font-size:18px;line-height:1.8'>{compare_text(generated_text, spoken)}</div>", unsafe_allow_html=True)
 
 st.markdown("---")
-st.caption("Made by Dr. Raju Murugan 💡 | Powered by Streamlit + JS Web Speech API")
+st.caption("Made by Dr. Raju Murugan 💡 | Powered by Streamlit + JavaScript Web Speech API")
